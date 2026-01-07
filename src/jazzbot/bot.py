@@ -33,7 +33,7 @@ class JazzBot(commands.Bot):
     def __init__(self) -> None:
         """Initialize the bot."""
         intents = discord.Intents.default()
-        intents.message_content = False  # No message content needed
+        intents.message_content = True  # No message content needed
         intents.voice_states = True
 
         super().__init__(
