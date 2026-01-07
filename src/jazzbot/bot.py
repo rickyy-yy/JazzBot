@@ -72,6 +72,7 @@ class JazzBot(commands.Bot):
     async def connect_lavalink(self) -> None:
         """Connect to Lavalink server."""
         try:
+            # Use http:// for local Lavalink servers (most use HTTP, not HTTPS)
             nodes = [
                 wavelink.Node(
                     uri=f"https://{Config.LAVALINK_HOST}:{Config.LAVALINK_PORT}",

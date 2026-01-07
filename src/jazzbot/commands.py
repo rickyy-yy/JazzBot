@@ -1,5 +1,6 @@
 """Slash command implementations for JazzBot."""
 
+import logging
 from typing import Optional
 
 import discord
@@ -57,6 +58,8 @@ class MusicCommands(commands.Cog):
         Returns:
             Wavelink Playable object or None
         """
+        logger = logging.getLogger(__name__)
+        
         try:
             # Check if it's a Spotify URL
             if self.spotify_resolver.is_spotify_url(query):
@@ -70,16 +73,38 @@ class MusicCommands(commands.Cog):
                     # Full playlist support can be added later
                     pass
 
+            # Check if query is already a URL (YouTube, etc.)
+            is_url = (
+                query.startswith("http://")
+                or query.startswith("https://")
+                or query.startswith("ytsearch:")
+                or query.startswith("scsearch:")
+            )
+
+            # If not a URL, add ytsearch: prefix for YouTube search
+            if not is_url:
+                query = f"ytsearch:{query}"
+
+            # Check if any nodes are available
+            if not wavelink.Pool.nodes:
+                logger.error("No Lavalink nodes available for search")
+                return None
+
             # Search using Wavelink
             tracks = await wavelink.Pool.fetch_tracks(query)
             if not tracks:
+                logger.warning(f"No tracks found for query: {query}")
                 return None
 
             # Return the first result
             if isinstance(tracks, wavelink.Playlist):
                 return tracks.tracks[0] if tracks.tracks else None
             return tracks[0] if tracks else None
-        except Exception:
+        except wavelink.NoNodesAvailable:
+            logger.error("No Lavalink nodes available")
+            return None
+        except Exception as e:
+            logger.error(f"Error searching for track '{query}': {e}", exc_info=True)
             return None
 
     async def play_track(
@@ -114,7 +139,7 @@ class MusicCommands(commands.Cog):
             source=source,
             duration=int(track.length / 1000),  # Convert ms to seconds
             requester=requester,
-            identifier=track.id or "",
+            identifier=str(track.uri) if track.uri else "",
             uri=str(track.uri) if track.uri else None,
         )
 
@@ -250,7 +275,7 @@ class MusicCommands(commands.Cog):
             source=source,
             duration=int(track.length / 1000),
             requester=interaction.user,  # type: ignore
-            identifier=track.id or "",
+            identifier=str(track.uri) if track.uri else "",
             uri=str(track.uri) if track.uri else None,
         )
 
