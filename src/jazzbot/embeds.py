@@ -5,7 +5,7 @@ from typing import Optional
 import discord
 from discord import Embed
 
-from jazzbot.config import Config
+from .config import Config
 
 
 def create_embed(

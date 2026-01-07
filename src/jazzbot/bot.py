@@ -8,8 +8,16 @@ from discord import app_commands
 from discord.ext import commands
 import wavelink
 
-from jazzbot.config import Config
-from jazzbot.embeds import error_embed
+# PyNaCl is required for voice support in discord.py
+try:
+    import nacl
+except ImportError:
+    raise ImportError(
+        "PyNaCl is required for voice support. Install it with: pip install PyNaCl"
+    )
+
+from .config import Config
+from .embeds import error_embed
 
 # Configure logging
 logging.basicConfig(
@@ -34,7 +42,7 @@ class JazzBot(commands.Bot):
             help_command=None,  # Disable default help command
         )
 
-        self.initial_extensions = ["jazzbot.commands"]
+        self.initial_extensions = ["src.jazzbot.commands"]
 
     async def setup_hook(self) -> None:
         """Setup hook called when bot is starting."""
@@ -66,7 +74,7 @@ class JazzBot(commands.Bot):
         try:
             nodes = [
                 wavelink.Node(
-                    uri=f"http://{Config.LAVALINK_HOST}:{Config.LAVALINK_PORT}",
+                    uri=f"https://{Config.LAVALINK_HOST}:{Config.LAVALINK_PORT}",
                     password=Config.LAVALINK_PASSWORD,
                 )
             ]

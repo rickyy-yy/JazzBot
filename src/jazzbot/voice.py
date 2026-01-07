@@ -5,7 +5,7 @@ from typing import Optional, Tuple
 import discord
 from discord import VoiceChannel, VoiceState
 
-from jazzbot.embeds import error_embed
+from .embeds import error_embed
 
 
 async def validate_voice_context(

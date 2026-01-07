@@ -7,17 +7,17 @@ from discord import app_commands
 from discord.ext import commands
 import wavelink
 
-from jazzbot.config import Config
-from jazzbot.embeds import (
+from .config import Config
+from .embeds import (
     create_embed,
     error_embed,
     info_embed,
     success_embed,
     warning_embed,
 )
-from jazzbot.queue import MusicQueue, QueueEntry
-from jazzbot.spotify import SpotifyResolver
-from jazzbot.voice import ensure_bot_voice_state, validate_voice_context
+from .queue import MusicQueue, QueueEntry
+from .spotify import SpotifyResolver
+from .voice import ensure_bot_voice_state, validate_voice_context
 
 
 class MusicCommands(commands.Cog):
