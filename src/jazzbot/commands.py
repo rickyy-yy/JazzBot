@@ -6,6 +6,7 @@ from typing import Optional
 import discord
 from discord import app_commands
 from discord.ext import commands
+from discord.ui import Button, View
 import wavelink
 
 from .config import Config
@@ -19,6 +20,54 @@ from .embeds import (
 from .queue import MusicQueue, QueueEntry
 from .spotify import SpotifyResolver
 from .voice import ensure_bot_voice_state, validate_voice_context
+
+
+class QueuePaginationView(View):
+    """View for paginating through the queue."""
+
+    def __init__(self, cog: "MusicCommands", queue: MusicQueue, guild_id: int, timeout: float = 180.0):
+        super().__init__(timeout=timeout)
+        self.cog = cog
+        self.queue = queue
+        self.guild_id = guild_id
+        self.current_page = 0
+        self.items_per_page = 10
+
+    def update_buttons(self) -> None:
+        """Update button states based on current page."""
+        total_items = len(self.queue.queue)
+        total_pages = (total_items + self.items_per_page - 1) // self.items_per_page if total_items > 0 else 1
+
+        # Enable/disable buttons based on page position
+        self.previous_button.disabled = self.current_page == 0
+        self.next_button.disabled = self.current_page >= total_pages - 1
+
+    async def update_message(self, interaction: discord.Interaction) -> None:
+        """Update the message with current page."""
+        embed = self.cog.create_queue_embed(self.queue, self.current_page, self.items_per_page)
+        self.update_buttons()
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="◀ Previous", style=discord.ButtonStyle.secondary, disabled=True)
+    async def previous_button(self, interaction: discord.Interaction, button: Button) -> None:
+        """Go to previous page."""
+        if self.current_page > 0:
+            self.current_page -= 1
+            await self.update_message(interaction)
+
+    @discord.ui.button(label="Next ▶", style=discord.ButtonStyle.secondary)
+    async def next_button(self, interaction: discord.Interaction, button: Button) -> None:
+        """Go to next page."""
+        total_items = len(self.queue.queue)
+        total_pages = (total_items + self.items_per_page - 1) // self.items_per_page if total_items > 0 else 1
+        if self.current_page < total_pages - 1:
+            self.current_page += 1
+            await self.update_message(interaction)
+
+    async def on_timeout(self) -> None:
+        """Handle view timeout by disabling buttons."""
+        for item in self.children:
+            item.disabled = True
 
 
 class MusicCommands(commands.Cog):
@@ -47,6 +96,54 @@ class MusicCommands(commands.Cog):
         if hours > 0:
             return f"{hours}:{minutes:02d}:{secs:02d}"
         return f"{minutes}:{secs:02d}"
+
+    def create_queue_embed(
+        self, queue: MusicQueue, page: int = 0, items_per_page: int = 10
+    ) -> discord.Embed:
+        """
+        Create an embed displaying the queue with pagination.
+
+        Args:
+            queue: The music queue
+            page: Current page number (0-based)
+            items_per_page: Number of items per page
+
+        Returns:
+            Discord embed with queue information
+        """
+        total_items = len(queue.queue)
+        total_pages = (total_items + items_per_page - 1) // items_per_page if total_items > 0 else 1
+
+        if total_items == 0:
+            return info_embed("Queue", "The queue is empty.")
+
+        # Calculate pagination
+        start_idx = page * items_per_page
+        end_idx = min(start_idx + items_per_page, total_items)
+        page_items = queue.queue[start_idx:end_idx]
+
+        # Build description
+        description_parts = []
+        for idx, entry in enumerate(page_items, start=start_idx + 1):
+            duration_str = self.format_duration(entry.duration)
+            requester_name = entry.requester.display_name if entry.requester else "Unknown"
+            
+            # Mark current track
+            marker = "▶️" if idx - 1 == queue.current_index else f"{idx}."
+            description_parts.append(
+                f"{marker} **{entry.title}**\n"
+                f"   └ Duration: {duration_str} | Source: {entry.source} | Requested by: {requester_name}"
+            )
+
+        description = "\n\n".join(description_parts)
+        
+        embed = info_embed(
+            "Music Queue",
+            description
+        )
+        embed.set_footer(text=f"Page {page + 1} of {total_pages} | Total: {total_items} track(s)")
+
+        return embed
 
     async def search_track(self, query: str) -> Optional[wavelink.Playable]:
         """
@@ -221,14 +318,33 @@ class MusicCommands(commands.Cog):
         # Play track
         await self.play_track(interaction, track, interaction.user)  # type: ignore
 
-    @app_commands.command(name="queue", description="Adds a song to the queue")
-    @app_commands.describe(query="Song name, YouTube URL, or Spotify URL")
+    @app_commands.command(name="queue", description="Adds a song to the queue or displays the current queue")
+    @app_commands.describe(query="Song name, YouTube URL, or Spotify URL (optional - omit to view queue)")
     async def queue_command(
-        self, interaction: discord.Interaction, query: str
+        self, interaction: discord.Interaction, query: Optional[str] = None
     ) -> None:
-        """Add a song to the queue (or play if queue is empty)."""
+        """
+        Add a song to the queue (or play if queue is empty).
+        If no query is provided, display the current queue with pagination.
+        """
         queue = self.get_queue(interaction.guild_id)  # type: ignore
 
+        # If no query provided, display the queue
+        if query is None:
+            if queue.is_empty:
+                await interaction.response.send_message(
+                    embed=info_embed("Queue", "The queue is empty.")
+                )
+                return
+
+            # Create pagination view
+            view = QueuePaginationView(self, queue, interaction.guild_id)  # type: ignore
+            embed = self.create_queue_embed(queue, 0, 10)
+            view.update_buttons()
+            await interaction.response.send_message(embed=embed, view=view)
+            return
+
+        # If query is provided, add song to queue (existing behavior)
         # Special case: if queue is empty, behave like /play
         if queue.is_empty:
             await self.play_command(interaction, query)
@@ -435,6 +551,27 @@ class MusicCommands(commands.Cog):
         await interaction.response.send_message(
             embed=success_embed("Disconnected", "Left the voice channel and cleared the queue.")
         )
+
+    @app_commands.command(name="help", description="Displays all available commands")
+    async def help_command(self, interaction: discord.Interaction) -> None:
+        """Display all available commands."""
+        commands_list = [
+            "**/play** `[query]` - Plays a song immediately or starts playback if idle",
+            "**/queue** `[query]` - Adds a song to the queue (omit query to view queue)",
+            "**/pause** - Pauses the currently playing track",
+            "**/unpause** - Resumes paused playback",
+            "**/skip** - Skips the currently playing track",
+            "**/jump** `[song_index]` - Jumps to a specific position in the queue",
+            "**/shuffle** - Randomizes the order of the remaining queue",
+            "**/quit** - Stops playback, clears the queue, and disconnects",
+            "**/help** - Displays this help message",
+        ]
+
+        description = "\n".join(commands_list)
+        embed = info_embed("JazzBot Commands", description)
+        embed.set_footer(text="Use /queue without parameters to view the current queue")
+
+        await interaction.response.send_message(embed=embed)
 
     @commands.Cog.listener()
     async def on_wavelink_track_end(
