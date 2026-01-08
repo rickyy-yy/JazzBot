@@ -1,5 +1,6 @@
 """Slash command implementations for JazzBot."""
 
+import asyncio
 import logging
 from typing import Optional
 
@@ -77,6 +78,8 @@ class MusicCommands(commands.Cog):
         """Initialize the music commands cog."""
         self.bot = bot
         self.queues: dict[int, MusicQueue] = {}  # guild_id -> queue
+        self.empty_channel_tasks: dict[int, asyncio.Task] = {}  # guild_id -> task
+        self.notification_channels: dict[int, discord.TextChannel] = {}  # guild_id -> textual channel
         self.spotify_resolver = SpotifyResolver(
             Config.SPOTIFY_CLIENT_ID, Config.SPOTIFY_CLIENT_SECRET
         )
@@ -281,6 +284,10 @@ class MusicCommands(commands.Cog):
             await interaction.response.send_message(embed=error_emb)
             return
 
+        # Store notification channel
+        if isinstance(interaction.channel, discord.TextChannel):
+            self.notification_channels[interaction.guild_id] = interaction.channel  # type: ignore
+
         # Ensure bot voice state
         bot_voice_client = interaction.guild.voice_client  # type: ignore
         is_valid, error_emb = await ensure_bot_voice_state(
@@ -293,8 +300,9 @@ class MusicCommands(commands.Cog):
         # Connect bot if not connected
         if bot_voice_client is None:
             try:
-                await voice_channel.connect(cls=wavelink.Player)
-                bot_voice_client = interaction.guild.voice_client  # type: ignore
+                player: wavelink.Player = await voice_channel.connect(cls=wavelink.Player)  # type: ignore
+                player.inactive_timeout = 600  # 10 minutes
+                bot_voice_client = player
             except Exception:
                 await interaction.response.send_message(
                     embed=error_embed(
@@ -559,7 +567,9 @@ class MusicCommands(commands.Cog):
         if voice_client:
             await voice_client.disconnect()
 
-        queue.clear()
+        del self.queues[interaction.guild_id]  # type: ignore
+        if interaction.guild_id in self.notification_channels:
+            del self.notification_channels[interaction.guild_id]  # type: ignore
 
         await interaction.response.send_message(
             embed=success_embed("Disconnected", "Left the voice channel and cleared the queue.")
@@ -608,6 +618,107 @@ class MusicCommands(commands.Cog):
         else:
             # Queue is empty
             queue.set_playing(False)
+
+    @commands.Cog.listener()
+    async def on_wavelink_inactive_player(self, player: wavelink.Player) -> None:
+        """Handle player inactivity by disconnecting."""
+        if player.guild:
+            # Clear queue
+            if player.guild.id in self.queues:
+                self.queues[player.guild.id].clear()
+            
+            # Cancel any empty channel task
+            if player.guild.id in self.empty_channel_tasks:
+                self.empty_channel_tasks[player.guild.id].cancel()
+                del self.empty_channel_tasks[player.guild.id]
+
+        await player.disconnect()
+
+        # Send notification
+        if player.guild and player.guild.id in self.notification_channels:
+            channel = self.notification_channels[player.guild.id]
+            try:
+                await channel.send(
+                    embed=info_embed(
+                        "Disconnected", 
+                        "I left the voice channel because I was idle for more than 10 minutes."
+                    )
+                )
+            except Exception:
+                pass  # Ignore if cannot send message
+            
+            del self.notification_channels[player.guild.id]
+
+    @commands.Cog.listener()
+    async def on_voice_state_update(
+        self,
+        member: discord.Member,
+        before: discord.VoiceState,
+        after: discord.VoiceState,
+    ) -> None:
+        """Handle voice state updates to disconnect when channel is empty."""
+        bot_id = self.bot.user.id if self.bot.user else None
+        
+        # We only care if the bot is in a voice channel in this guild
+        if not member.guild.voice_client:
+            return
+
+        bot_player: wavelink.Player = member.guild.voice_client  # type: ignore
+        if not bot_player.channel:
+            return
+
+        # Check if the update affects the bot's channel
+        affected = False
+        if before.channel and before.channel.id == bot_player.channel.id:
+            affected = True
+        elif after.channel and after.channel.id == bot_player.channel.id:
+            affected = True
+            
+        if not affected:
+            return
+
+        # Check member count (excluding bots is optional, but user said "users")
+        # Let's count non-bot members
+        members = bot_player.channel.members
+        non_bot_count = sum(1 for m in members if not m.bot)
+
+        guild_id = member.guild.id
+
+        if non_bot_count == 0:
+            # Schedule disconnect if not already scheduled
+            if guild_id not in self.empty_channel_tasks:
+                async def disconnect_after_timeout() -> None:
+                    await asyncio.sleep(600)  # 10 minutes
+                    if member.guild.voice_client:
+                        await member.guild.voice_client.disconnect()
+                        if guild_id in self.queues:
+                            self.queues[guild_id].clear()
+                        
+                        # Send notification
+                        if guild_id in self.notification_channels:
+                            channel = self.notification_channels[guild_id]
+                            try:
+                                await channel.send(
+                                    embed=info_embed(
+                                        "Disconnected", 
+                                        "I left the voice channel because it was empty."
+                                    )
+                                )
+                            except Exception:
+                                pass
+                            del self.notification_channels[guild_id]
+
+                    if guild_id in self.empty_channel_tasks:
+                        del self.empty_channel_tasks[guild_id]
+
+                self.empty_channel_tasks[guild_id] = self.bot.loop.create_task(
+                    disconnect_after_timeout()
+                )
+        else:
+            # Cancel disconnect if scheduled
+            if guild_id in self.empty_channel_tasks:
+                self.empty_channel_tasks[guild_id].cancel()
+                del self.empty_channel_tasks[guild_id]
 
 
 async def setup(bot: commands.Bot) -> None:
