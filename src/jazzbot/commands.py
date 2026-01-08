@@ -268,12 +268,11 @@ class MusicCommands(commands.Cog):
         else:
             await interaction.response.send_message(embed=embed)
 
-    @app_commands.command(name="play", description="Plays a song immediately or starts playback if idle")
-    @app_commands.describe(query="Song name, YouTube URL, or Spotify URL")
-    async def play_command(
-        self, interaction: discord.Interaction, query: str
-    ) -> None:
-        """Play a song immediately or add to queue if already playing."""
+    async def _play_track_search_and_play(self, interaction: discord.Interaction, query: str) -> None:
+        """
+        Helper method to validate voice state, connect, search, and play a track.
+        Used by both /play and /queue commands.
+        """
         # Validate voice context
         is_valid, error_emb, voice_channel = await validate_voice_context(
             interaction
@@ -318,6 +317,14 @@ class MusicCommands(commands.Cog):
         # Play track
         await self.play_track(interaction, track, interaction.user)  # type: ignore
 
+    @app_commands.command(name="play", description="Plays a song immediately or starts playback if idle")
+    @app_commands.describe(query="Song name, YouTube URL, or Spotify URL")
+    async def play_command(
+        self, interaction: discord.Interaction, query: str
+    ) -> None:
+        """Play a song immediately or add to queue if already playing."""
+        await self._play_track_search_and_play(interaction, query)
+
     @app_commands.command(name="queue", description="Adds a song to the queue or displays the current queue")
     @app_commands.describe(query="Song name, YouTube URL, or Spotify URL (optional - omit to view queue)")
     async def queue_command(
@@ -347,7 +354,7 @@ class MusicCommands(commands.Cog):
         # If query is provided, add song to queue (existing behavior)
         # Special case: if queue is empty, behave like /play
         if queue.is_empty:
-            await self.play_command(interaction, query)
+            await self._play_track_search_and_play(interaction, query)
             return
 
         # Validate voice context
@@ -413,6 +420,12 @@ class MusicCommands(commands.Cog):
         if not voice_client or not voice_client.playing:
             await interaction.response.send_message(
                 embed=error_embed("Not Playing", "No track is currently playing.")
+            )
+            return
+
+        if voice_client.paused:
+            await interaction.response.send_message(
+                embed=error_embed("Already Paused", "Playback is already paused.")
             )
             return
 
