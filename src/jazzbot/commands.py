@@ -410,13 +410,13 @@ class MusicCommands(commands.Cog):
         """Pause the currently playing track."""
         voice_client: Optional[wavelink.Player] = interaction.guild.voice_client  # type: ignore
 
-        if not voice_client or not voice_client.is_playing():
+        if not voice_client or not voice_client.playing:
             await interaction.response.send_message(
                 embed=error_embed("Not Playing", "No track is currently playing.")
             )
             return
 
-        await voice_client.pause()
+        await voice_client.pause(True)
         queue = self.get_queue(interaction.guild_id)  # type: ignore
         queue.set_paused(True)
 
@@ -429,13 +429,13 @@ class MusicCommands(commands.Cog):
         """Resume paused playback."""
         voice_client: Optional[wavelink.Player] = interaction.guild.voice_client  # type: ignore
 
-        if not voice_client or not voice_client.is_paused():
+        if not voice_client or not voice_client.paused:
             await interaction.response.send_message(
                 embed=error_embed("Not Paused", "Playback is not paused.")
             )
             return
 
-        await voice_client.resume()
+        await voice_client.pause(False)
         queue = self.get_queue(interaction.guild_id)  # type: ignore
         queue.set_paused(False)
 
@@ -449,7 +449,7 @@ class MusicCommands(commands.Cog):
         voice_client: Optional[wavelink.Player] = interaction.guild.voice_client  # type: ignore
         queue = self.get_queue(interaction.guild_id)  # type: ignore
 
-        if not voice_client or not voice_client.is_playing():
+        if not voice_client or not voice_client.playing:
             await interaction.response.send_message(
                 embed=error_embed("Not Playing", "No track is currently playing.")
             )
