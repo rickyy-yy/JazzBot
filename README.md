@@ -60,13 +60,13 @@ pip install -r requirements.txt
 ## Running the Bot
 
 ```bash
-python -m src.jazzbot.bot
+python -m run
 ```
 
 Or if you prefer:
 
 ```bash
-python src/jazzbot/bot.py
+python run.py
 ```
 
 ## Configuration
@@ -157,8 +157,4 @@ This project follows clean code principles:
 ## License
 
 This project is provided as-is for educational and personal use.
-
-## Support
-
-For issues or questions, please refer to the PRD document or check the code comments for implementation details.
 
