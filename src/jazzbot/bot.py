@@ -65,9 +65,12 @@ class JazzBot(commands.Bot):
         """Called when bot is ready."""
         logger.info(f"Logged in as {self.user} (ID: {self.user.id})")  # type: ignore
         logger.info(f"Connected to {len(self.guilds)} guild(s)")
-
+        
         # Connect to Lavalink
         await self.connect_lavalink()
+
+        # Change status
+        await self.change_presence(activity=discord.Streaming(name="Music Playlist", url="https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=RDdQw4w9WgXcQ&start_radio=1&pp=ygUXbmV2ZXIgZ29ubmEgZ2l2ZSB5b3UgdXCgBwE%3D"))
 
     async def connect_lavalink(self) -> None:
         """Connect to Lavalink server."""
